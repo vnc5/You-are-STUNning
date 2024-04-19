@@ -55,7 +55,8 @@ fn recv(sockfd: posix.socket_t) !void {
     var addrlen = addr.getOsSockLen();
     var buf = [_]u8{0} ** 1500;
     while (true) {
-        _ = try posix.recvfrom(sockfd, &buf, 0, @ptrCast(&addr), &addrlen);
+        const len = try posix.recvfrom(sockfd, &buf, 0, @ptrCast(&addr), &addrlen);
+        if (len < 20) continue;
         if (!std.mem.eql(u8, buf[0..2], &binding_req)) continue;
         buf[0] = 0b00_00000_1; // binding success response
         var ip_offset: u8 = 0; // ipv4 is stored at the end in addr.sa.addr
