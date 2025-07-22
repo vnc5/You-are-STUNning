@@ -47,34 +47,52 @@ fn listen(address: *std.net.Address, isMain: bool) !void {
 }
 
 fn recv(sockfd: posix.socket_t) !void {
-    const isIpv4 = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+    const is_ipv4 = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
     const binding_req = [_]u8{ 0b00_00000_0, 0b000_0_0001 };
-    var xorMappedAddress = [_]u8{ 0x00, 0x20, 0x00, 0x08, 0x00, 0x01 };
+    var xor_mapped_addr = [_]u8{ 0x00, 0x20, 0x00, 0x08, 0x00, 0x01 };
 
     var addr: std.net.Ip6Address = undefined;
-    var addrlen = addr.getOsSockLen();
+    var addr_len = addr.getOsSockLen();
     var buf = [_]u8{0} ** 1500;
     while (true) {
-        const len = try posix.recvfrom(sockfd, &buf, 0, @ptrCast(&addr), &addrlen);
+        const len = posix.recvfrom(sockfd, &buf, 0, @ptrCast(&addr), &addr_len) catch |err| {
+            var fbs_buf: [100]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&fbs_buf);
+            try addr.format("", .{}, fbs.writer());
+            std.log.err("recvfrom failed with error: {s}. ip {s}\n", .{
+                @errorName(err),
+                fbs.getWritten(),
+            });
+            continue;
+        };
         if (len < 20) continue;
         if (!std.mem.eql(u8, buf[0..2], &binding_req)) continue;
         buf[0] = 0b00_00000_1; // binding success response
         var ip_offset: u8 = 0; // ipv4 is stored at the end in addr.sa.addr
-        if (std.mem.eql(u8, addr.sa.addr[0..12], &isIpv4)) {
+        if (std.mem.eql(u8, addr.sa.addr[0..12], &is_ipv4)) {
             buf[3] = 12; // length
-            xorMappedAddress[3] = 8; // ipv4 length
-            xorMappedAddress[5] = 1; // ipv4
+            xor_mapped_addr[3] = 8; // ipv4 length
+            xor_mapped_addr[5] = 1; // ipv4
             ip_offset = 12;
         } else {
             buf[3] = 24; // length
-            xorMappedAddress[3] = 20; // ipv6 length
-            xorMappedAddress[5] = 2; // ipv6
+            xor_mapped_addr[3] = 20; // ipv6 length
+            xor_mapped_addr[5] = 2; // ipv6
         }
-        std.mem.copyForwards(u8, buf[20..], &xorMappedAddress);
+        std.mem.copyForwards(u8, buf[20..], &xor_mapped_addr);
         std.mem.writeInt(u16, buf[26..28], addr.sa.port ^ 0x1221, .little); // swap magic byte order because sa.port big endian
         for (0..(16 - ip_offset)) |i| {
             buf[28 + i] = addr.sa.addr[ip_offset + i] ^ buf[4 + i]; // xor address with transaction id (incl magic cookie)
         }
-        _ = try posix.sendto(sockfd, buf[0..(28 + (16 - ip_offset))], 0, @ptrCast(&addr), addrlen);
+        _ = posix.sendto(sockfd, buf[0..(28 + (16 - ip_offset))], 0, @ptrCast(&addr), addr_len) catch |err| {
+            var fbs_buf: [100]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&fbs_buf);
+            try addr.format("", .{}, fbs.writer());
+            std.log.err("sendto failed with error: {s}. ip {s}\n", .{
+                @errorName(err),
+                fbs.getWritten(),
+            });
+            continue;
+        };
     }
 }
