@@ -27,7 +27,7 @@ fn listen(address: *std.net.Address, isMain: bool) !void {
     const sockfd = try posix.socket(address.any.family, posix.SOCK.DGRAM | posix.SOCK.CLOEXEC, posix.IPPROTO.UDP);
     errdefer posix.close(sockfd);
     if (builtin.os.tag == .windows) {
-        // Apparently Windows only has REUSEADDR which apparently also completely takes over the port and therefore no load balancing whatsoever. Last one wins?
+        // Windows apparently has REUSEADDR only which apparently also completely takes over the port and therefore no load balancing whatsoever. Last one wins?
         try posix.setsockopt(sockfd, posix.SOL.SOCKET, posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
         // Zig: posix.SOL.IPV6 is missing for Windows: std.c.windows.SOL.IPV6
         try posix.setsockopt(sockfd, std.os.linux.IPPROTO.IPV6, std.os.windows.ws2_32.IPV6_V6ONLY, &std.mem.toBytes(@as(c_int, 0)));
@@ -59,13 +59,14 @@ fn recv(sockfd: posix.socket_t) !void {
             var fbs_buf: [100]u8 = undefined;
             var fbs = std.io.fixedBufferStream(&fbs_buf);
             try addr.format("", .{}, fbs.writer());
-            std.log.err("recvfrom failed with error: {s}. ip {s}\n", .{
+            std.log.err("recvfrom failed with error: {s}. ip {s}", .{
                 @errorName(err),
                 fbs.getWritten(),
             });
             continue;
         };
         if (len < 20) continue;
+        if (addr.sa.port == 0) continue;
         if (!std.mem.eql(u8, buf[0..2], &binding_req)) continue;
         buf[0] = 0b00_00000_1; // binding success response
         var ip_offset: u8 = 0; // ipv4 is stored at the end in addr.sa.addr
@@ -88,7 +89,7 @@ fn recv(sockfd: posix.socket_t) !void {
             var fbs_buf: [100]u8 = undefined;
             var fbs = std.io.fixedBufferStream(&fbs_buf);
             try addr.format("", .{}, fbs.writer());
-            std.log.err("sendto failed with error: {s}. ip {s}\n", .{
+            std.log.err("sendto failed with error: {s}. ip {s}", .{
                 @errorName(err),
                 fbs.getWritten(),
             });
